@@ -138,6 +138,8 @@ pub fn execute(
             amount,
             during_unbonding,
         } => execute_register_slash(deps, env, info, validator, time, amount, during_unbonding),
+        #[cfg(feature = "staking")]
+        ExecuteMsg::Vote { proposal_id, vote } => execute_vote(deps, info, proposal_id, vote),
     }
 }
 
@@ -460,6 +462,33 @@ pub fn execute_register_slash(
             .add_attribute("time", time.to_string())
             .add_attribute("amount", amount))
     }
+}
+
+#[cfg(feature = "staking")]
+pub fn execute_vote(
+    deps: DepsMut,
+    info: MessageInfo,
+    proposal_id: u64,
+    vote: cosmwasm_std::VoteOption,
+) -> Result<Response, ContractError> {
+    use cosmwasm_std::GovMsg;
+    nonpayable(&info)?;
+
+    let vest = PAYMENT.get_vest(deps.storage)?;
+    match vest.status {
+        Status::Unfunded | Status::Funded => {
+            if info.sender != vest.recipient {
+                return Err(ContractError::NotReceiver);
+            }
+        }
+        Status::Canceled { .. } => return Err(ContractError::Cancelled),
+    }
+
+    let msg = GovMsg::Vote { proposal_id, vote };
+    Ok(Response::default()
+        .add_attribute("method", "execute_vote")
+        .add_attribute("proposal_id", proposal_id.to_string())
+        .add_message(msg))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]

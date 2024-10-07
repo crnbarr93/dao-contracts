@@ -185,6 +185,18 @@ pub enum ExecuteMsg {
         /// the common case where the slash impacted bonding tokens.
         during_unbonding: bool,
     },
+    /// Vote on a proposal
+    ///
+    /// Only callable by the vesting recipient
+    ///
+    /// Errors if the vesting is cancelled
+    #[cfg(feature = "staking")]
+    Vote {
+        /// The proposal id to vote on
+        proposal_id: u64,
+        /// The vote option to vote with
+        vote: cosmwasm_std::VoteOption,
+    },
 }
 
 #[cw_serde]
