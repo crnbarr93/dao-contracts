@@ -139,7 +139,7 @@ pub fn execute(
             during_unbonding,
         } => execute_register_slash(deps, env, info, validator, time, amount, during_unbonding),
         #[cfg(feature = "staking")]
-        ExecuteMsg::Vote { proposal_id, vote } => execute_vote(deps, info, proposal_id, vote),
+        ExecuteMsg::Vote { proposal_id, vote } => execute_vote(deps, env, info, proposal_id, vote),
     }
 }
 
@@ -467,13 +467,13 @@ pub fn execute_register_slash(
 #[cfg(feature = "staking")]
 pub fn execute_vote(
     deps: DepsMut,
+    env: Env,
     info: MessageInfo,
     proposal_id: u64,
     vote: cosmwasm_std::VoteOption,
 ) -> Result<Response, ContractError> {
-    use cosmwasm_std::GovMsg;
+    use cosmwasm_std::{ensure, GovMsg};
     nonpayable(&info)?;
-
     let vest = PAYMENT.get_vest(deps.storage)?;
     match vest.status {
         Status::Unfunded | Status::Funded => {
@@ -483,6 +483,11 @@ pub fn execute_vote(
         }
         Status::Canceled { .. } => return Err(ContractError::Cancelled),
     }
+
+    let delegatations = deps
+        .querier
+        .query_all_delegations(env.contract.address.clone())?;
+    ensure!(!delegatations.is_empty(), ContractError::CannotVote);
 
     let msg = GovMsg::Vote { proposal_id, vote };
     Ok(Response::default()

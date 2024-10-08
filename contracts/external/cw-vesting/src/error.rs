@@ -64,6 +64,9 @@ pub enum ContractError {
     #[error("no delegation to validator {0}")]
     NoDelegation(String),
 
+    #[error("cannot vote without a delegation")]
+    CannotVote,
+
     #[error("slash amount can not be zero")]
     NoSlash,
 

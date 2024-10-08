@@ -1,7 +1,13 @@
 use cosmwasm_std::{
-    coins, testing::mock_env, Addr, BlockInfo, Decimal, Timestamp, Uint128, Uint64, Validator,
+    coins,
+    testing::{mock_env, MockApi, MockStorage},
+    Addr, BlockInfo, Decimal, Empty, Timestamp, Uint128, Uint64, Validator, VoteOption,
 };
-use cw_multi_test::{App, BankSudo, Executor, StakingInfo, StakingSudo};
+use cw_multi_test::{
+    App, AppBuilder, BankKeeper, BankSudo, DistributionKeeper, Executor, FailingModule,
+    GovAcceptingModule, IbcFailingModule, StakeKeeper, StakingInfo, StakingSudo, StargateFailing,
+    WasmKeeper,
+};
 use dao_testing::contracts::cw_vesting_contract;
 
 use crate::{
@@ -11,7 +17,19 @@ use crate::{
 };
 
 pub(crate) struct Suite {
-    app: App,
+    #[allow(clippy::type_complexity)]
+    app: App<
+        BankKeeper,
+        MockApi,
+        MockStorage,
+        FailingModule<Empty, Empty, Empty>,
+        WasmKeeper<Empty, Empty>,
+        StakeKeeper,
+        DistributionKeeper,
+        IbcFailingModule,
+        GovAcceptingModule,
+        StargateFailing,
+    >,
     pub owner: Option<Addr>,
     pub receiver: Addr,
     pub vesting: Addr,
@@ -46,36 +64,39 @@ impl Default for SuiteBuilder {
 
 impl SuiteBuilder {
     pub fn build(self) -> Suite {
-        let mut app = App::new(|router, api, storage| {
-            router
-                .staking
-                .add_validator(
-                    api,
-                    storage,
-                    &mock_env().block,
-                    Validator {
-                        address: "validator".to_string(),
-                        commission: Decimal::zero(), // zero percent comission to keep math simple.
-                        max_commission: Decimal::percent(10),
-                        max_change_rate: Decimal::percent(2),
-                    },
-                )
-                .unwrap();
-            router
-                .staking
-                .add_validator(
-                    api,
-                    storage,
-                    &mock_env().block,
-                    Validator {
-                        address: "otherone".to_string(),
-                        commission: Decimal::zero(), // zero percent comission to keep math simple.
-                        max_commission: Decimal::percent(10),
-                        max_change_rate: Decimal::percent(2),
-                    },
-                )
-                .unwrap();
-        });
+        let mut app =
+            AppBuilder::new()
+                .with_gov(GovAcceptingModule::new())
+                .build(|router, api, storage| {
+                    router
+                        .staking
+                        .add_validator(
+                            api,
+                            storage,
+                            &mock_env().block,
+                            Validator {
+                                address: "validator".to_string(),
+                                commission: Decimal::zero(), // zero percent comission to keep math simple.
+                                max_commission: Decimal::percent(10),
+                                max_change_rate: Decimal::percent(2),
+                            },
+                        )
+                        .unwrap();
+                    router
+                        .staking
+                        .add_validator(
+                            api,
+                            storage,
+                            &mock_env().block,
+                            Validator {
+                                address: "otherone".to_string(),
+                                commission: Decimal::zero(), // zero percent comission to keep math simple.
+                                max_commission: Decimal::percent(10),
+                                max_change_rate: Decimal::percent(2),
+                            },
+                        )
+                        .unwrap();
+                });
 
         let funds = if let cw_denom::UncheckedDenom::Native(ref denom) = self.instantiate.denom {
             let funds = coins(self.instantiate.total.u128(), denom);
@@ -332,6 +353,25 @@ impl Suite {
                     time,
                     amount,
                     during_unbonding: true,
+                },
+                &[],
+            )
+            .map(|_| ())
+    }
+
+    pub fn vote<S: Into<String>>(
+        &mut self,
+        sender: S,
+        proposal_id: u64,
+        option: VoteOption,
+    ) -> anyhow::Result<()> {
+        self.app
+            .execute_contract(
+                Addr::unchecked(sender),
+                self.vesting.clone(),
+                &ExecuteMsg::Vote {
+                    proposal_id,
+                    vote: option,
                 },
                 &[],
             )

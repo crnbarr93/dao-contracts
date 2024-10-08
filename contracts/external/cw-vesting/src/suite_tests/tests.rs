@@ -1,4 +1,4 @@
-use cosmwasm_std::{Timestamp, Uint128, Uint64};
+use cosmwasm_std::{Timestamp, Uint128, Uint64, VoteOption};
 use cw_multi_test::App;
 use cw_ownable::OwnershipError;
 
@@ -679,4 +679,27 @@ fn test_piecewise_and_queries() {
     // canceled, duration no longer has a meaning.
     let duration = suite.query_duration();
     assert_eq!(duration, None);
+}
+
+#[test]
+fn test_vote() {
+    let mut suite = SuiteBuilder::default()
+        .with_start_time(SuiteBuilder::default().build().what_block_is_it().time)
+        .with_curve(Schedule::SaturatingLinear)
+        .build();
+
+    let err = suite
+        .vote(suite.receiver.clone(), 1, VoteOption::Yes)
+        .unwrap_err();
+
+    assert!(err
+        .root_cause()
+        .to_string()
+        .contains("cannot vote without a delegation"));
+
+    suite.delegate(Uint128::from(100u128)).unwrap();
+
+    suite
+        .vote(suite.receiver.clone(), 1, VoteOption::Yes)
+        .unwrap();
 }
