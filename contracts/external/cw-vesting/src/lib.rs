@@ -1,8 +1,10 @@
 #![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))]
 
+pub mod andromeda;
 pub mod contract;
 pub mod error;
 pub mod msg;
+pub mod shim;
 pub mod state;
 pub mod vesting;
 

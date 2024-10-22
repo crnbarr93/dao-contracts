@@ -1,21 +1,20 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_json, to_json_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response,
+    ensure, from_json, to_json_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response,
     StdResult, Uint128,
 };
 #[cfg(feature = "staking")]
-use cosmwasm_std::{
-    Coin, DelegationResponse, DistributionMsg, StakingMsg, StakingQuery, Timestamp,
-};
+use cosmwasm_std::{Coin, DelegationResponse, StakingMsg, StakingQuery, Timestamp};
 use cw2::set_contract_version;
 use cw20::Cw20ReceiveMsg;
 use cw_denom::CheckedDenom;
 use cw_ownable::OwnershipError;
 use cw_utils::{must_pay, nonpayable};
 
+use crate::andromeda::MsgSetWithdrawAddress;
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg};
+use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg, ReceiveMsg};
 use crate::state::{PAYMENT, UNBONDING_DURATION_SECONDS};
 use crate::vesting::{Status, VestInit};
 
@@ -55,7 +54,53 @@ pub fn instantiate(
     )?;
     UNBONDING_DURATION_SECONDS.save(deps.storage, &msg.unbonding_duration_seconds)?;
 
-    let resp: Option<CosmosMsg> = match vest.denom {
+    let mut response = Response::new()
+        .add_attribute("method", "instantiate")
+        .add_attribute("owner", msg.owner.unwrap_or_else(|| "None".to_string()));
+
+    #[cfg(feature = "staking")]
+    {
+        let delegated_amount = if let Some(delegations) = msg.delegations.clone() {
+            delegations.iter().map(|delegation| delegation.amount).sum()
+        } else {
+            Uint128::zero()
+        };
+
+        ensure!(
+            vest.total() >= delegated_amount,
+            ContractError::DelegationTooLarge
+        );
+
+        let delegation_msgs = if let Some(delegations) = msg.delegations {
+            delegations.iter().for_each(|delegation| {
+                PAYMENT
+                    .on_delegate(
+                        deps.storage,
+                        env.block.time,
+                        delegation.validator.clone(),
+                        delegation.amount,
+                    )
+                    .unwrap();
+            });
+
+            delegations
+                .iter()
+                .map(|delegation| StakingMsg::Delegate {
+                    validator: delegation.validator.clone(),
+                    amount: Coin {
+                        denom: vest.denom.to_string(),
+                        amount: delegation.amount,
+                    },
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+
+        response = response.add_messages(delegation_msgs);
+    }
+
+    let resp = match vest.denom {
         CheckedDenom::Native(ref denom) => {
             let sent = must_pay(&info, denom)?;
             if vest.total() != sent {
@@ -72,11 +117,10 @@ pub fn instantiate(
             // they receive the rewards.
             #[cfg(feature = "staking")]
             if denom.as_str() == deps.querier.query_bonded_denom()? {
-                Some(CosmosMsg::Distribution(
-                    DistributionMsg::SetWithdrawAddress {
-                        address: vest.recipient.to_string(),
-                    },
-                ))
+                Some(MsgSetWithdrawAddress {
+                    delegator_address: env.contract.address.to_string(),
+                    withdraw_address: vest.recipient.to_string(),
+                })
             } else {
                 None
             }
@@ -90,10 +134,9 @@ pub fn instantiate(
         }
     };
 
-    Ok(Response::new()
-        .add_attribute("method", "instantiate")
-        .add_attribute("owner", msg.owner.unwrap_or_else(|| "None".to_string()))
-        .add_messages(resp))
+    response = response.add_messages(resp);
+
+    Ok(response)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -130,7 +173,13 @@ pub fn execute(
             execute_set_withdraw_address(deps, env, info, address)
         }
         #[cfg(feature = "staking")]
-        ExecuteMsg::WithdrawDelegatorReward { validator } => execute_withdraw_rewards(validator),
+        ExecuteMsg::WithdrawDelegatorReward { validator } => {
+            execute_withdraw_rewards(env, validator)
+        }
+        #[cfg(feature = "staking")]
+        ExecuteMsg::UpdateUnbondingDuration {
+            unbonding_duration_seconds,
+        } => execute_update_unbonding_duration(deps, info, unbonding_duration_seconds),
         #[cfg(feature = "staking")]
         ExecuteMsg::RegisterSlash {
             validator,
@@ -189,7 +238,12 @@ pub fn execute_cancel_vesting_payment(
 ) -> Result<Response, ContractError> {
     cw_ownable::assert_owner(deps.storage, &info.sender)?;
 
-    let msgs = PAYMENT.cancel(deps.storage, env.block.time, &info.sender)?;
+    let msgs = PAYMENT.cancel(
+        deps.storage,
+        env.block.time,
+        &info.sender,
+        &env.contract.address,
+    )?;
 
     Ok(Response::new()
         .add_attribute("method", "remove_vesting_payment")
@@ -393,6 +447,21 @@ pub fn execute_undelegate(
         .add_attribute("amount", amount))
 }
 
+pub fn execute_update_unbonding_duration(
+    deps: DepsMut,
+    info: MessageInfo,
+    unbonding_duration_seconds: u64,
+) -> Result<Response, ContractError> {
+    cw_ownable::assert_owner(deps.storage, &info.sender)?;
+    UNBONDING_DURATION_SECONDS.save(deps.storage, &unbonding_duration_seconds)?;
+    Ok(Response::default()
+        .add_attribute("method", "update_unbonding_duration")
+        .add_attribute(
+            "unbonding_duration_seconds",
+            unbonding_duration_seconds.to_string(),
+        ))
+}
+
 #[cfg(feature = "staking")]
 pub fn execute_set_withdraw_address(
     deps: DepsMut,
@@ -416,8 +485,9 @@ pub fn execute_set_withdraw_address(
         return Err(ContractError::SelfWithdraw);
     }
 
-    let msg = DistributionMsg::SetWithdrawAddress {
-        address: address.clone(),
+    let msg = MsgSetWithdrawAddress {
+        delegator_address: env.contract.address.to_string(),
+        withdraw_address: address.clone(),
     };
 
     Ok(Response::default()
@@ -427,8 +497,13 @@ pub fn execute_set_withdraw_address(
 }
 
 #[cfg(feature = "staking")]
-pub fn execute_withdraw_rewards(validator: String) -> Result<Response, ContractError> {
-    let withdraw_msg = DistributionMsg::WithdrawDelegatorReward { validator };
+pub fn execute_withdraw_rewards(env: Env, validator: String) -> Result<Response, ContractError> {
+    use crate::andromeda::MsgWithdrawDelegatorReward;
+
+    let withdraw_msg = MsgWithdrawDelegatorReward {
+        delegator_address: env.contract.address.to_string(),
+        validator_address: validator.clone(),
+    };
     Ok(Response::default()
         .add_attribute("method", "execute_withdraw_rewards")
         .add_message(withdraw_msg))
@@ -515,4 +590,9 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::TotalToVest {} => to_json_binary(&PAYMENT.get_vest(deps.storage)?.total()),
         QueryMsg::VestDuration {} => to_json_binary(&PAYMENT.duration(deps.storage)?),
     }
+}
+
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> Result<Response, ContractError> {
+    Ok(Response::default())
 }

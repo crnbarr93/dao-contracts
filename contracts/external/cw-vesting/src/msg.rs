@@ -8,6 +8,12 @@ use cw_stake_tracker::StakeTrackerQuery;
 use crate::vesting::Schedule;
 
 #[cw_serde]
+pub struct Delegation {
+    pub validator: String,
+    pub amount: Uint128,
+}
+
+#[cw_serde]
 pub struct InstantiateMsg {
     /// The optional owner address of the contract. If an owner is
     /// specified, the owner may cancel the vesting contract at any
@@ -58,6 +64,9 @@ pub struct InstantiateMsg {
     /// external calculations with correct values to withdraw
     /// avaliable funds from the contract.
     pub unbonding_duration_seconds: u64,
+
+    #[cfg(feature = "staking")]
+    pub delegations: Option<Vec<Delegation>>,
 }
 
 #[cw_ownable_execute]
@@ -94,6 +103,9 @@ pub enum ExecuteMsg {
     /// rewards and may unbond and withdraw (staked - (vested -
     /// claimed)) tokens at their leisure.
     Cancel {},
+    UpdateUnbondingDuration {
+        unbonding_duration_seconds: u64,
+    },
     /// This is translated to a
     /// [MsgDelegate](https://github.com/cosmos/cosmos-sdk/blob/v0.40.0/proto/cosmos/staking/v1beta1/tx.proto#L81-L90).
     /// `delegator_address` is automatically filled with the current
@@ -136,7 +148,9 @@ pub enum ExecuteMsg {
     /// contract's address.  Only callable by Vesting Payment
     /// Recipient.
     #[cfg(feature = "staking")]
-    SetWithdrawAddress { address: String },
+    SetWithdrawAddress {
+        address: String,
+    },
     /// This is translated to a
     /// [MsgWithdrawDelegatorReward](https://github.com/cosmos/cosmos-sdk/blob/v0.42.4/proto/cosmos/distribution/v1beta1/tx.proto#L42-L50).
     /// `delegator_address` is automatically filled with the current
@@ -246,3 +260,6 @@ pub enum QueryMsg {
     #[returns(::cosmwasm_std::Uint128)]
     Stake(StakeTrackerQuery),
 }
+
+#[cw_serde]
+pub struct MigrateMsg {}

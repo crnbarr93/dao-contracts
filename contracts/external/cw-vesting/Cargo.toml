@@ -34,6 +34,11 @@ cw20 = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 wynd-utils = { workspace = true }
+osmosis-std-derive = { workspace = true }
+prost = { workspace = true }
+prost-derive = { workspace = true }
+prost-types = { workspace = true }
+schemars = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }

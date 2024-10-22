@@ -1,8 +1,6 @@
 use std::cmp::min;
 
 use cosmwasm_schema::cw_serde;
-#[cfg(feature = "staking")]
-use cosmwasm_std::DistributionMsg;
 use cosmwasm_std::{Addr, Binary, CosmosMsg, StdResult, Storage, Timestamp, Uint128, Uint64};
 use cw_denom::CheckedDenom;
 use cw_storage_plus::Item;
@@ -10,7 +8,7 @@ use wynd_utils::{Curve, PiecewiseLinear, SaturatingLinear};
 
 use cw_stake_tracker::{StakeTracker, StakeTrackerQuery};
 
-use crate::error::ContractError;
+use crate::{andromeda::MsgSetWithdrawAddress, error::ContractError};
 
 pub struct Payment<'a> {
     vesting: Item<'a, Vest>,
@@ -215,6 +213,7 @@ impl<'a> Payment<'a> {
         storage: &mut dyn Storage,
         t: Timestamp,
         owner: &Addr,
+        contract_address: &Addr,
     ) -> Result<Vec<CosmosMsg>, ContractError> {
         let mut vesting = self.vesting.load(storage)?;
         if matches!(vesting.status, Status::Canceled { .. }) {
@@ -247,8 +246,9 @@ impl<'a> Payment<'a> {
             // the owner to the reward receiver.
             let mut msgs = vec![
                 #[cfg(feature = "staking")]
-                DistributionMsg::SetWithdrawAddress {
-                    address: owner.to_string(),
+                MsgSetWithdrawAddress {
+                    delegator_address: contract_address.to_string(),
+                    withdraw_address: owner.to_string(),
                 }
                 .into(),
             ];

@@ -84,4 +84,7 @@ pub enum ContractError {
 
     #[error("can't register a slash event occuring in the future")]
     FutureSlash,
+
+    #[error("delegation amount is greater than the vesting amount")]
+    DelegationTooLarge,
 }

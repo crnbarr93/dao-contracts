@@ -692,7 +692,12 @@ fn test_update_owner() {
         )
         .unwrap();
     PAYMENT
-        .cancel(deps.storage, env().block.time, &Addr::unchecked("owner"))
+        .cancel(
+            deps.storage,
+            env().block.time,
+            &Addr::unchecked("owner"),
+            &env().contract.address,
+        )
         .unwrap();
     let err = execute(
         deps,

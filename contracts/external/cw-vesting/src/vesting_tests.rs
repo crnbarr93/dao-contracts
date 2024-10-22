@@ -206,7 +206,12 @@ fn test_complex_close() {
     assert_eq!(vest.vested(time), Uint128::new(50));
 
     payment
-        .cancel(storage, time, &Addr::unchecked("owner"))
+        .cancel(
+            storage,
+            time,
+            &Addr::unchecked("owner"),
+            &Addr::unchecked("contract"),
+        )
         .unwrap();
 
     let vest = payment.get_vest(storage).unwrap();
